@@ -1,5 +1,6 @@
 package managers
 
-import "omega-pkg/pkg/lang"
+import _ "embed"
 
-var Pacman lang.CustomManager
+//go:embed base.hcl
+var Base []byte

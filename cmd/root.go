@@ -25,6 +25,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"omega-pkg/internal/managers"
 	"omega-pkg/pkg/lang"
 	"omega-pkg/pkg/zerolog_extension"
 	"os"
@@ -85,9 +86,13 @@ func initConfig() {
 	////var c lang.Config
 	////moreDiags := gohcl.DecodeBody(f.Body, nil, &c)
 	parser := hclparse.NewParser()
+	base, baseDiags := parser.ParseHCL(managers.Base, "base.hcl")
+
 	f, diags := parser.ParseHCLFile("server.hcl")
+	body := hcl.MergeBodies([]hcl.Body{base.Body, f.Body})
 	var c lang.Config
-	diags = append(diags, gohcl.DecodeBody(f.Body, nil, &c)...)
+	bodyDiags := gohcl.DecodeBody(body, nil, &c)
+	diags = append(append(diags, baseDiags...), bodyDiags...)
 
 	wr := hcl.NewDiagnosticTextWriter(
 		zerolog_extension.LoggerWithLevel(log.Logger, zerolog.ErrorLevel), // writer to send messages to

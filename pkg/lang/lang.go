@@ -43,12 +43,10 @@ func (a *CustomManagerAction) Validate(globalCmd string, hasCmd bool) error {
 }
 
 func (a *CustomManagerAction) Run(ctx context.Context, logger zerolog.Logger, data []string, additionalArgs ...string) {
-	args, err := shellwords.Split(a.Flags)
+	args, err := shellwords.Split(a.Flags + strings.Join(additionalArgs, " "))
 	if err != nil {
 		logger.Err(err).Msg("error on split args")
 	}
-	args = append(args, additionalArgs...)
-
 	if len(a.Inline) == 0 {
 		if data != nil {
 			args = append(args, data...)
@@ -98,7 +96,7 @@ func runCommand(ctx context.Context, logger zerolog.Logger, command string, args
 type CustomManager struct {
 	Name      string                 `hcl:"name,label"`
 	Cmd       string                 `hcl:"cmd,optional"`
-	Flags     []string               `hcl:"flags,optional"`
+	Flags     string                 `hcl:"flags,optional"`
 	Actions   []*CustomManagerAction `hcl:"action,block"`
 	ActionMap map[string]*CustomManagerAction
 }
@@ -129,7 +127,7 @@ type Constraints struct {
 type Set struct {
 	Action      string       `hcl:"action,label"`
 	Packages    []string     `hcl:"packages"`
-	Flags       []string     `hcl:"flags,optional"`
+	Flags       string       `hcl:"flags,optional"`
 	Constraints *Constraints `hcl:"constraints,block"`
 }
 
@@ -154,12 +152,13 @@ func (m *Manager) Run(ctx context.Context, logger zerolog.Logger, customManager 
 	if m.Dryrun {
 		ctx = context.WithValue(ctx, "dryrun", true)
 	}
+	customManager.ActionMap["refresh"].Run(ctx, logger, nil)
 	if m.Update {
 		customManager.ActionMap["update"].Run(ctx, logger, nil)
 	}
 	for _, set := range m.Sets {
 		action := customManager.ActionMap[set.Action]
-		action.Run(ctx, logger, set.Packages, set.Flags...)
+		action.Run(ctx, logger, set.Packages, set.Flags)
 	}
 	if m.Cleanup {
 		customManager.ActionMap["clean"].Run(ctx, logger, nil)
