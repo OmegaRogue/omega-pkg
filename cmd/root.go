@@ -46,19 +46,9 @@ to quickly create a Cobra application.`,
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
 		c := viper.Get("").(lang.Config)
-
 		for _, manager := range c.Managers {
 			customManager := c.CustomManagerMap[manager.Name]
-			if manager.Update {
-				customManager.ActionMap["update"].Run(context.TODO(), log.Logger, nil)
-			}
-			for _, set := range manager.Sets {
-				action := customManager.ActionMap[set.Action]
-				action.Run(context.TODO(), log.Logger, set.Packages, set.Flags...)
-			}
-			if manager.Cleanup {
-				customManager.ActionMap["clean"].Run(context.TODO(), log.Logger, nil)
-			}
+			manager.Run(context.TODO(), log.Logger, customManager)
 		}
 	},
 }

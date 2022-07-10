@@ -73,6 +73,14 @@ func runCommand(ctx context.Context, logger zerolog.Logger, command string, args
 		cmd.Env = append(os.Environ(), env.([]string)...)
 	}
 
+	if ctx.Value("dryrun") == true {
+		for _, s := range cmd.Env {
+			fmt.Println(s)
+		}
+		fmt.Println(command + " " + strings.Join(args, " "))
+		return
+	}
+
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -84,6 +92,7 @@ func runCommand(ctx context.Context, logger zerolog.Logger, command string, args
 	if err := cmd.Wait(); err != nil {
 		logger.Err(err).Msg("error on run command")
 	}
+
 }
 
 type CustomManager struct {
@@ -136,9 +145,27 @@ type Manager struct {
 	Name         string       `hcl:"name,label"`
 	Update       bool         `hcl:"update,optional"`
 	Cleanup      bool         `hcl:"clean,optional"`
+	Dryrun       bool         `hcl:"dryrun,optional"`
 	Sets         []Set        `hcl:"set,block"`
 	Repositories []Repository `hcl:"repo,block"`
 }
+
+func (m *Manager) Run(ctx context.Context, logger zerolog.Logger, customManager *CustomManager) {
+	if m.Dryrun {
+		ctx = context.WithValue(ctx, "dryrun", true)
+	}
+	if m.Update {
+		customManager.ActionMap["update"].Run(ctx, logger, nil)
+	}
+	for _, set := range m.Sets {
+		action := customManager.ActionMap[set.Action]
+		action.Run(ctx, logger, set.Packages, set.Flags...)
+	}
+	if m.Cleanup {
+		customManager.ActionMap["clean"].Run(ctx, logger, nil)
+	}
+}
+
 type Config struct {
 	Managers         []Manager        `hcl:"manager,block"`
 	CustomManagers   []*CustomManager `hcl:"custom_manager,block"`
