@@ -17,11 +17,17 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
-	"fmt"
-	"os"
-
+	"context"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/gohcl"
+	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"omega-pkg/pkg/lang"
+	"omega-pkg/pkg/zerolog_extension"
+	"os"
 )
 
 var cfgFile string
@@ -38,7 +44,23 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		c := viper.Get("").(lang.Config)
+
+		for _, manager := range c.Managers {
+			customManager := c.CustomManagerMap[manager.Name]
+			if manager.Update {
+				customManager.ActionMap["update"].Run(context.TODO(), log.Logger, nil)
+			}
+			for _, set := range manager.Sets {
+				action := customManager.ActionMap[set.Action]
+				action.Run(context.TODO(), log.Logger, set.Packages, set.Flags...)
+			}
+			if manager.Cleanup {
+				customManager.ActionMap["clean"].Run(context.TODO(), log.Logger, nil)
+			}
+		}
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -46,11 +68,14 @@ to quickly create a Cobra application.`,
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
+		log.Fatal().Err(err).Msg("error on run")
 		os.Exit(1)
 	}
 }
 
 func init() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+
 	cobra.OnInitialize(initConfig)
 
 	// Here you will define your flags and configuration settings.
@@ -66,24 +91,36 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
 
-		// Search config in home directory with name ".omega-pkg" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".omega-pkg")
+	////var c lang.Config
+	////moreDiags := gohcl.DecodeBody(f.Body, nil, &c)
+	parser := hclparse.NewParser()
+	f, diags := parser.ParseHCLFile("server.hcl")
+	var c lang.Config
+	diags = append(diags, gohcl.DecodeBody(f.Body, nil, &c)...)
+
+	wr := hcl.NewDiagnosticTextWriter(
+		zerolog_extension.LoggerWithLevel(log.Logger, zerolog.ErrorLevel), // writer to send messages to
+		parser.Files(), // the parser's file cache, for source snippets
+		1000,           // wrapping width
+		true,           // generate colored/highlighted output
+	)
+
+	if err := c.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("Error parsing config")
 	}
 
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+	if err := wr.WriteDiagnostics(diags); err != nil {
+		log.Fatal().Err(err).Msg("Error writing diagnostics")
 	}
+	viper.Set("", c)
+	//if cfgFile != "" {
+	//	viper.Set(cfgFile)
+	//	// Use config file from the flag.
+	//	//viper.SetConfigFile(cfgFile)
+	//} else {
+	//	// Find home directory.
+	//	home, err := os.UserHomeDir()
+	//	cobra.CheckErr(err)
+	//}
 }
