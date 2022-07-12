@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/Wing924/shellwords"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"os"
 	"os/exec"
 	"strings"
@@ -19,14 +18,14 @@ const (
 	ActionUpdate  = "update"
 )
 
-type CustomManagerAction struct {
+type Action struct {
 	Type   string   `hcl:"type,label"`
 	Cmd    string   `hcl:"cmd,optional"`
 	Flags  string   `hcl:"flags,optional"`
 	Inline []string `hcl:"inline,optional"`
 }
 
-func (a *CustomManagerAction) Validate(globalCmd string, hasCmd bool) error {
+func (a *Action) Validate(globalCmd string, hasCmd bool) error {
 	if hasCmd && len(a.Inline) == 0 {
 		a.Cmd = globalCmd
 	}
@@ -42,26 +41,32 @@ func (a *CustomManagerAction) Validate(globalCmd string, hasCmd bool) error {
 	return nil
 }
 
-func (a *CustomManagerAction) Run(ctx context.Context, logger zerolog.Logger, data []string, additionalArgs ...string) {
+func (a *Action) Run(ctx context.Context, data []string, additionalArgs ...string) error {
 	args, err := shellwords.Split(a.Flags + strings.Join(additionalArgs, " "))
 	if err != nil {
-		logger.Err(err).Msg("error on split args")
+		return errors.Wrap(err, "error on split args")
 	}
 	if len(a.Inline) == 0 {
 		if data != nil {
 			args = append(args, data...)
 		}
-		runCommand(ctx, logger, a.Cmd, args...)
-		return
+
+		if err := runCommand(ctx, a.Cmd, args...); err != nil {
+			return errors.Wrap(err, "error on run command")
+		}
+		return nil
 	}
 	if data != nil {
 		ctx = context.WithValue(ctx, "env", []string{fmt.Sprintf("data=%s", data)})
 	}
 
-	runCommand(ctx, logger, a.Cmd, append(args, strings.Join(a.Inline, "\n"))...)
+	if err := runCommand(ctx, a.Cmd, append(args, strings.Join(a.Inline, "\n"))...); err != nil {
+		return errors.Wrap(err, "error on run command")
+	}
+	return nil
 
 }
-func runCommand(ctx context.Context, logger zerolog.Logger, command string, args ...string) {
+func runCommand(ctx context.Context, command string, args ...string) error {
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd := ctx.Value("cwd"); cwd != nil {
@@ -76,7 +81,7 @@ func runCommand(ctx context.Context, logger zerolog.Logger, command string, args
 			fmt.Println(s)
 		}
 		fmt.Println(command + " " + strings.Join(args, " "))
-		return
+		return nil
 	}
 
 	cmd.Stdin = os.Stdin
@@ -84,26 +89,27 @@ func runCommand(ctx context.Context, logger zerolog.Logger, command string, args
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		logger.Err(err).Msg("error on run command")
+		return errors.Wrap(err, "error on start command")
 	}
 
 	if err := cmd.Wait(); err != nil {
-		logger.Err(err).Msg("error on run command")
+		return errors.Wrap(err, "error on wait for command completion")
 	}
+	return nil
 
 }
 
 type CustomManager struct {
-	Name      string                 `hcl:"name,label"`
-	Cmd       string                 `hcl:"cmd,optional"`
-	Flags     string                 `hcl:"flags,optional"`
-	Actions   []*CustomManagerAction `hcl:"action,block"`
-	ActionMap map[string]*CustomManagerAction
+	Name      string    `hcl:"name,label"`
+	Cmd       string    `hcl:"cmd,optional"`
+	Flags     string    `hcl:"flags,optional"`
+	Actions   []*Action `hcl:"action,block"`
+	ActionMap map[string]*Action
 }
 
 func (m *CustomManager) Validate() error {
 	if m.ActionMap == nil {
-		m.ActionMap = make(map[string]*CustomManagerAction)
+		m.ActionMap = make(map[string]*Action)
 	}
 	hasCmd := m.Cmd != ""
 	if len(m.Actions) == 0 {
@@ -119,9 +125,14 @@ func (m *CustomManager) Validate() error {
 }
 
 type Constraints struct {
-	OS       string   `hcl:"os,optional"`
-	Arch     string   `hcl:"arch,optional"`
-	Variants []string `hcl:"variants,optional"`
+	Value bool `hcl:"value"`
+}
+
+func (c *Constraints) Match() bool {
+	if c == nil {
+		return true
+	}
+	return c.Value
 }
 
 type Set struct {
@@ -129,6 +140,21 @@ type Set struct {
 	Packages    []string     `hcl:"packages"`
 	Flags       string       `hcl:"flags,optional"`
 	Constraints *Constraints `hcl:"constraints,block"`
+}
+
+func (s *Set) Run(ctx context.Context) error {
+	run := s.Constraints.Match()
+	action, ok := ctx.Value("action").(*Action)
+	if !ok {
+		return errors.New("action is nil")
+	}
+	if !run {
+		return nil
+	}
+	if err := action.Run(ctx, s.Packages, s.Flags); err != nil {
+		return errors.Wrap(err, "error on run action")
+	}
+	return nil
 }
 
 type Repository struct {
@@ -143,26 +169,40 @@ type Manager struct {
 	Name         string       `hcl:"name,label"`
 	Update       bool         `hcl:"update,optional"`
 	Cleanup      bool         `hcl:"clean,optional"`
-	Dryrun       bool         `hcl:"dryrun,optional"`
+	DryRun       bool         `hcl:"dry,optional"`
 	Sets         []Set        `hcl:"set,block"`
 	Repositories []Repository `hcl:"repo,block"`
 }
 
-func (m *Manager) Run(ctx context.Context, logger zerolog.Logger, customManager *CustomManager) {
-	if m.Dryrun {
+func (m *Manager) Run(ctx context.Context) error {
+	if m.DryRun {
 		ctx = context.WithValue(ctx, "dryrun", true)
 	}
-	customManager.ActionMap["refresh"].Run(ctx, logger, nil)
+	customManager, ok := ctx.Value("customManager").(*CustomManager)
+	if !ok {
+		return errors.New("customManager is nil")
+	}
+	if err := customManager.ActionMap["refresh"].Run(ctx, nil); err != nil {
+		return errors.Wrap(err, "error on refresh packages")
+	}
 	if m.Update {
-		customManager.ActionMap["update"].Run(ctx, logger, nil)
+		if err := customManager.ActionMap["update"].Run(ctx, nil); err != nil {
+			return errors.Wrap(err, "error on update packages")
+		}
 	}
 	for _, set := range m.Sets {
 		action := customManager.ActionMap[set.Action]
-		action.Run(ctx, logger, set.Packages, set.Flags)
+		ctx = context.WithValue(ctx, "action", action)
+		if err := set.Run(ctx); err != nil {
+			return errors.Wrapf(err, "error on %s packages", action.Type)
+		}
 	}
 	if m.Cleanup {
-		customManager.ActionMap["clean"].Run(ctx, logger, nil)
+		if err := customManager.ActionMap["clean"].Run(ctx, nil); err != nil {
+			return errors.Wrap(err, "error on clean packages")
+		}
 	}
+	return nil
 }
 
 type Config struct {

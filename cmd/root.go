@@ -25,6 +25,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/zcalusic/sysinfo"
+	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/gocty"
 	"omega-pkg/internal/managers"
 	"omega-pkg/pkg/lang"
 	"omega-pkg/pkg/zerolog_extension"
@@ -46,10 +49,26 @@ to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
+		var si sysinfo.SysInfo
+		si.GetSysInfo()
+		//data, err := json.MarshalIndent(&si, "", "  ")
+		//if err != nil {
+		//	log.Fatal().Err(err).Send()
+		//}
+		//fmt.Println(string(data))
+		ctx := log.Logger.WithContext(context.Background())
 		c := viper.Get("").(lang.Config)
+		//data, err = json.MarshalIndent(&c, "", "  ")
+		//if err != nil {
+		//	log.Fatal().Err(err).Send()
+		//}
+		//fmt.Println(string(data))
 		for _, manager := range c.Managers {
 			customManager := c.CustomManagerMap[manager.Name]
-			manager.Run(context.TODO(), log.Logger, customManager)
+			ctx = context.WithValue(ctx, "customManager", customManager)
+			if err := manager.Run(ctx); err != nil {
+				log.Fatal().Err(err).Msgf("error on run manager %s", manager.Name)
+			}
 		}
 	},
 }
@@ -91,7 +110,23 @@ func initConfig() {
 	f, diags := parser.ParseHCLFile("server.hcl")
 	body := hcl.MergeBodies([]hcl.Body{base.Body, f.Body})
 	var c lang.Config
-	bodyDiags := gohcl.DecodeBody(body, nil, &c)
+	var si sysinfo.SysInfo
+	si.GetSysInfo()
+	typ, err := gocty.ImpliedType(si)
+	if err != nil {
+		log.Fatal().Err(err).Msg("error on convert sysinfo to cty.Type")
+	}
+	val, err := gocty.ToCtyValue(si, typ)
+	if err != nil {
+		log.Fatal().Err(err).Msg("error on convert sysinfo to cty.Value")
+	}
+	ctx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"sysinfo": val,
+			"variant": cty.StringVal(""),
+		},
+	}
+	bodyDiags := gohcl.DecodeBody(body, ctx, &c)
 	diags = append(append(diags, baseDiags...), bodyDiags...)
 
 	wr := hcl.NewDiagnosticTextWriter(
