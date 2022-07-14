@@ -26,8 +26,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/zcalusic/sysinfo"
-	"github.com/zclconf/go-cty/cty"
-	"github.com/zclconf/go-cty/cty/gocty"
 	"omega-pkg/internal/managers"
 	"omega-pkg/pkg/lang"
 	"omega-pkg/pkg/zerolog_extension"
@@ -57,19 +55,16 @@ to quickly create a Cobra application.`,
 		//}
 		//fmt.Println(string(data))
 		ctx := log.Logger.WithContext(context.Background())
-		c := viper.Get("").(lang.Config)
+		c := viper.Get("config").(lang.Config)
+		if err := c.Run(ctx); err != nil {
+			log.Fatal().Err(err).Msg("error on run")
+		}
 		//data, err = json.MarshalIndent(&c, "", "  ")
 		//if err != nil {
 		//	log.Fatal().Err(err).Send()
 		//}
 		//fmt.Println(string(data))
-		for _, manager := range c.Managers {
-			customManager := c.CustomManagerMap[manager.Name]
-			ctx = context.WithValue(ctx, "customManager", customManager)
-			if err := manager.Run(ctx); err != nil {
-				log.Fatal().Err(err).Msgf("error on run manager %s", manager.Name)
-			}
-		}
+
 	},
 }
 
@@ -110,21 +105,9 @@ func initConfig() {
 	f, diags := parser.ParseHCLFile("server.hcl")
 	body := hcl.MergeBodies([]hcl.Body{base.Body, f.Body})
 	var c lang.Config
-	var si sysinfo.SysInfo
-	si.GetSysInfo()
-	typ, err := gocty.ImpliedType(si)
+	ctx, err := lang.BuildGlobalContext()
 	if err != nil {
-		log.Fatal().Err(err).Msg("error on convert sysinfo to cty.Type")
-	}
-	val, err := gocty.ToCtyValue(si, typ)
-	if err != nil {
-		log.Fatal().Err(err).Msg("error on convert sysinfo to cty.Value")
-	}
-	ctx := &hcl.EvalContext{
-		Variables: map[string]cty.Value{
-			"sysinfo": val,
-			"variant": cty.StringVal(""),
-		},
+		log.Fatal().Err(err).Msg("Error build global hcl context")
 	}
 	bodyDiags := gohcl.DecodeBody(body, ctx, &c)
 	diags = append(append(diags, baseDiags...), bodyDiags...)
@@ -136,14 +119,14 @@ func initConfig() {
 		true,           // generate colored/highlighted output
 	)
 
-	if err := c.Validate(); err != nil {
-		log.Fatal().Err(err).Msg("Error parsing config")
-	}
+	validationDiags := c.Validate(ctx)
+	diags = append(diags, validationDiags...)
 
 	if err := wr.WriteDiagnostics(diags); err != nil {
 		log.Fatal().Err(err).Msg("Error writing diagnostics")
 	}
-	viper.Set("", c)
+	viper.Set("config", c)
+	viper.Set("ctx", ctx)
 	//if cfgFile != "" {
 	//	viper.Set(cfgFile)
 	//	// Use config file from the flag.

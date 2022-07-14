@@ -4,11 +4,19 @@ import (
 	"context"
 	"fmt"
 	"github.com/Wing924/shellwords"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/gohcl"
+	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/pkg/errors"
+	"github.com/zclconf/go-cty/cty"
 	"os"
 	"os/exec"
 	"strings"
 )
+
+type contextKey struct {
+	name string
+}
 
 const (
 	ActionClean   = "clean"
@@ -18,27 +26,77 @@ const (
 	ActionUpdate  = "update"
 )
 
+var (
+	EnvContextKey           = contextKey{"env"}
+	DryrunContextKey        = contextKey{"dryrun"}
+	CwdContextKey           = contextKey{"cwd"}
+	ActionContextKey        = contextKey{"action"}
+	CustomManagerContextKey = contextKey{"customManager"}
+	HclContextKey           = contextKey{"hclctx"}
+)
+
 type Action struct {
-	Type   string   `hcl:"type,label"`
-	Cmd    string   `hcl:"cmd,optional"`
-	Flags  string   `hcl:"flags,optional"`
-	Inline []string `hcl:"inline,optional"`
+	Type       string         `hcl:"type,label"`
+	CmdExpr    hcl.Expression `hcl:"cmd,optional"`
+	Cmd        string
+	FlagExprs  hcl.Expression `hcl:"flags,optional"`
+	Flags      string
+	InlineExpr []hcl.Expression `hcl:"inline,optional"`
+	Inline     []string
 }
 
-func (a *Action) Validate(globalCmd string, hasCmd bool) error {
-	if hasCmd && len(a.Inline) == 0 {
-		a.Cmd = globalCmd
+func (a *Action) Validate(
+	ctx *hcl.EvalContext, globalCmdExpr hcl.Expression, globalFlagExpr hcl.Expression,
+) hcl.Diagnostics {
+	var diags hcl.Diagnostics
+	globalCmd := ""
+	moreDiags := gohcl.DecodeExpression(globalCmdExpr, ctx, &globalCmd)
+	diags = append(diags, moreDiags...)
+	globalFlags := ""
+	moreDiags = gohcl.DecodeExpression(globalFlagExpr, ctx, &globalFlags)
+	diags = append(diags, moreDiags...)
+
+	if a.Cmd == "" {
+		if globalCmd != "" && len(a.Inline) == 0 {
+			a.Cmd = globalCmd
+		}
+		if globalCmd == "" && len(a.Inline) == 0 {
+			ran := a.CmdExpr.Range()
+			for _, expression := range a.InlineExpr {
+				ran = hcl.RangeOver(ran, expression.Range())
+			}
+			diag := &hcl.Diagnostic{
+				Severity: hcl.DiagWarning,
+				Summary:  fmt.Sprintf("no global command and no command or inline defined on action %s", a.Type),
+				Subject:  &ran,
+			}
+			diags = append(diags, diag)
+		}
+		if len(a.Inline) > 0 {
+			a.Cmd = "/bin/sh -c"
+		}
 	}
-	if a.Cmd == "" && len(a.Inline) > 0 {
-		a.Cmd = "/bin/sh"
-		a.Flags = "-c"
+	moreDiags = gohcl.DecodeExpression(a.FlagExprs, ctx, &a.Flags)
+	diags = append(diags, moreDiags...)
+	if globalFlags != "" {
+		a.Flags = fmt.Sprintf("%s %s", globalFlags, a.Flags)
 	}
-	if !hasCmd && a.Cmd == "" && len(a.Inline) == 0 {
-		return errors.Errorf(
-			"no global command and no command or inline defined on action %s", a.Type,
-		)
+
+	if a.Cmd == "" {
+		moreDiags := gohcl.DecodeExpression(a.CmdExpr, ctx, &a.Cmd)
+		diags = append(diags, moreDiags...)
 	}
-	return nil
+	for _, expression := range a.InlineExpr {
+		var inline string
+		moreDiags := gohcl.DecodeExpression(expression, ctx, &inline)
+		diags = append(diags, moreDiags...)
+		a.Inline = append(a.Inline, inline)
+	}
+	if len(a.Inline) > 0 {
+		a.Cmd = "/bin/sh -c"
+	}
+
+	return diags
 }
 
 func (a *Action) Run(ctx context.Context, data []string, additionalArgs ...string) error {
@@ -50,14 +108,13 @@ func (a *Action) Run(ctx context.Context, data []string, additionalArgs ...strin
 		if data != nil {
 			args = append(args, data...)
 		}
-
 		if err := runCommand(ctx, a.Cmd, args...); err != nil {
 			return errors.Wrap(err, "error on run command")
 		}
 		return nil
 	}
 	if data != nil {
-		ctx = context.WithValue(ctx, "env", []string{fmt.Sprintf("data=%s", data)})
+		ctx = context.WithValue(ctx, EnvContextKey, []string{fmt.Sprintf("data=%s", data)})
 	}
 
 	if err := runCommand(ctx, a.Cmd, append(args, strings.Join(a.Inline, "\n"))...); err != nil {
@@ -69,14 +126,14 @@ func (a *Action) Run(ctx context.Context, data []string, additionalArgs ...strin
 func runCommand(ctx context.Context, command string, args ...string) error {
 
 	cmd := exec.CommandContext(ctx, command, args...)
-	if cwd := ctx.Value("cwd"); cwd != nil {
+	if cwd := ctx.Value(CwdContextKey); cwd != nil {
 		cmd.Dir = cwd.(string)
 	}
-	if env := ctx.Value("env"); env != nil {
+	if env := ctx.Value(EnvContextKey); env != nil {
 		cmd.Env = append(os.Environ(), env.([]string)...)
 	}
 
-	if ctx.Value("dryrun") == true {
+	if ctx.Value(DryrunContextKey) == true {
 		for _, s := range cmd.Env {
 			fmt.Println(s)
 		}
@@ -100,28 +157,32 @@ func runCommand(ctx context.Context, command string, args ...string) error {
 }
 
 type CustomManager struct {
-	Name      string    `hcl:"name,label"`
-	Cmd       string    `hcl:"cmd,optional"`
-	Flags     string    `hcl:"flags,optional"`
-	Actions   []*Action `hcl:"action,block"`
+	Name      string         `hcl:"name,label"`
+	CmdExpr   hcl.Expression `hcl:"cmd,optional"`
+	FlagExprs hcl.Expression `hcl:"flags,optional"`
+	Actions   []*Action      `hcl:"action,block"`
 	ActionMap map[string]*Action
 }
 
-func (m *CustomManager) Validate() error {
+func (m *CustomManager) Validate(ctx *hcl.EvalContext) hcl.Diagnostics {
+	var diags hcl.Diagnostics
 	if m.ActionMap == nil {
 		m.ActionMap = make(map[string]*Action)
 	}
-	hasCmd := m.Cmd != ""
 	if len(m.Actions) == 0 {
-		return errors.Errorf("no actions defined on m %s", m.Name)
-	}
-	for _, action := range m.Actions {
-		if err := action.Validate(m.Cmd, hasCmd); err != nil {
-			return errors.Wrapf(err, "error on manager %s", m.Name)
+		diag := &hcl.Diagnostic{
+			Severity: hcl.DiagWarning,
+			Summary:  fmt.Sprintf("no actions defined on CustomManager %s", m.Name),
 		}
-		m.ActionMap[action.Type] = action
+		diags = append(diags, diag)
+	} else {
+		for _, action := range m.Actions {
+			moreDiags := action.Validate(ctx.NewChild(), m.CmdExpr, m.FlagExprs)
+			diags = append(diags, moreDiags...)
+			m.ActionMap[action.Type] = action
+		}
 	}
-	return nil
+	return diags
 }
 
 type Constraints struct {
@@ -144,7 +205,7 @@ type Set struct {
 
 func (s *Set) Run(ctx context.Context) error {
 	run := s.Constraints.Match()
-	action, ok := ctx.Value("action").(*Action)
+	action, ok := ctx.Value(ActionContextKey).(*Action)
 	if !ok {
 		return errors.New("action is nil")
 	}
@@ -176,9 +237,9 @@ type Manager struct {
 
 func (m *Manager) Run(ctx context.Context) error {
 	if m.DryRun {
-		ctx = context.WithValue(ctx, "dryrun", true)
+		ctx = context.WithValue(ctx, DryrunContextKey, true)
 	}
-	customManager, ok := ctx.Value("customManager").(*CustomManager)
+	customManager, ok := ctx.Value(CustomManagerContextKey).(*CustomManager)
 	if !ok {
 		return errors.New("customManager is nil")
 	}
@@ -192,7 +253,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	for _, set := range m.Sets {
 		action := customManager.ActionMap[set.Action]
-		ctx = context.WithValue(ctx, "action", action)
+		ctx = context.WithValue(ctx, ActionContextKey, action)
 		if err := set.Run(ctx); err != nil {
 			return errors.Wrapf(err, "error on %s packages", action.Type)
 		}
@@ -211,21 +272,94 @@ type Config struct {
 	CustomManagerMap map[string]*CustomManager
 }
 
-func (c *Config) Validate() error {
+func (c *Config) Validate(ctx *hcl.EvalContext) hcl.Diagnostics {
+	var diags hcl.Diagnostics
 	if c.CustomManagerMap == nil {
 		c.CustomManagerMap = make(map[string]*CustomManager)
 	}
 	for _, manager := range c.CustomManagers {
-		if err := manager.Validate(); err != nil {
-			return errors.Wrap(err, "error parsing custom managers")
-		}
+		moreDiags := manager.Validate(ctx.NewChild())
+		diags = append(diags, moreDiags...)
 		c.CustomManagerMap[manager.Name] = manager
 	}
 	for _, manager := range c.Managers {
-		if _, ok := c.CustomManagerMap[manager.Name]; !ok {
-			return errors.Errorf("manager %s does not exist", manager.Name)
+		m, ok := c.CustomManagerMap[manager.Name]
+		if !ok {
+			diag := &hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  fmt.Sprintf("manager %s does not exist", manager.Name),
+				Detail:   fmt.Sprintf("manager declared for %s but is no known CustomManager", manager.Name),
+			}
+			diags = append(diags, diag)
 		}
+		for i, set := range manager.Sets {
+			ctx := ctx.NewChild()
+			pkgs := []cty.Value{}
+			ctx.Variables["pkgs"] = cty.ListVal()
+		}
+
 	}
 
+	return diags
+}
+
+func (c *Config) Run(ctx context.Context) error {
+	for _, manager := range c.Managers {
+		customManager := c.CustomManagerMap[manager.Name]
+		ctx = context.WithValue(ctx, CustomManagerContextKey, customManager)
+		if err := manager.Run(ctx); err != nil {
+			return errors.Wrapf(err, "error on run manager %s", manager.Name)
+		}
+	}
 	return nil
+}
+
+var spec = hcldec.ObjectSpec{
+	"manager": &hcldec.BlockMapSpec{
+		TypeName:   "manager",
+		LabelNames: []string{"name"},
+		Nested: hcldec.ObjectSpec{
+
+			"update": &hcldec.AttrSpec{
+				Name:     "update",
+				Type:     cty.Bool,
+				Required: false,
+			},
+			"clean": &hcldec.AttrSpec{
+				Name:     "clean",
+				Type:     cty.Bool,
+				Required: false,
+			},
+			"dry": &hcldec.AttrSpec{
+				Name:     "dry",
+				Type:     cty.Bool,
+				Required: false,
+			},
+			"set": &hcldec.BlockListSpec{
+				TypeName: "set",
+				Nested: &hcldec.BlockMapSpec{
+					TypeName:   "set",
+					LabelNames: []string{"action"},
+					Nested:     hcldec.ObjectSpec{},
+				},
+				MinItems: 0,
+				MaxItems: 0,
+			},
+			"repo": &hcldec.BlockListSpec{
+				TypeName: "repo",
+				Nested: &hcldec.BlockMapSpec{
+					TypeName:   "repo",
+					LabelNames: []string{"name"},
+					Nested:     hcldec.ObjectSpec{},
+				},
+				MinItems: 0,
+				MaxItems: 0,
+			},
+		},
+	},
+	"custom_manager": &hcldec.BlockMapSpec{
+		TypeName:   "custom_manager",
+		LabelNames: []string{"name"},
+		Nested:     hcldec.ObjectSpec{},
+	},
 }
