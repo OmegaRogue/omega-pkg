@@ -1,60 +1,60 @@
 custom_manager "paru" {
   cmd = "paru"
-  flags = "--noconfirm"
+  flags = ["--noconfirm"]
   action "clean" {
-    flags = "-Sc --cleanafter"
+    flags = ["-Sc", "--cleanafter"]
   }
   action "install" {
-    flags = "-S --needed"
+    flags = ["-S", "--needed"]
   }
   action "remove" {
-    flags = "-Rcs"
+    flags = ["-Rcs"]
   }
   action "refresh" {
-    flags = "-Syy"
+    flags = ["-Syy"]
   }
   action "update" {
-    flags = "-Su"
+    flags = ["-Su"]
   }
 }
 
 custom_manager "pacman" {
   cmd = "pacman"
-  flags = "--noconfirm"
+  flags = ["--noconfirm"]
   action "clean" {
-    flags = "-Sc"
+    flags = ["-Sc"]
   }
   action "install" {
-    flags = "-S --needed"
+    flags = ["-S", "--needed"]
   }
   action "remove" {
-    flags = "-Rcs"
+    flags = ["-Rcs"]
   }
   action "refresh" {
-    flags = "-Syy"
+    flags = ["-Syy"]
   }
   action "update" {
-    flags = "-Su"
+    flags = ["-Su"]
   }
 }
 
 custom_manager "apk" {
   cmd = "apk"
-  flags = "--no-cache"
+  flags = ["--no-cache"]
   action "clean" {
-    flags = "-Sc"
+    flags = ["-Sc"]
   }
   action "install" {
-    flags = "add"
+    flags = ["add"]
   }
   action "remove" {
-    flags = "del --rdepends"
+    flags = ["del", "--rdepends"]
   }
   action "refresh" {
-    flags = "update"
+    flags = ["update"]
   }
   action "update" {
-    flags = "upgrade"
+    flags = ["upgrade"]
   }
 }
 
@@ -63,18 +63,18 @@ custom_manager "apt" {
   cmd = "apt-get"
   flags = "-y"
   action "clean" {
-    flags = "clean"
+    flags = ["clean"]
   }
   action "install" {
-    flags = "install"
+    flags = ["install"]
   }
   action "remove" {
-    flags = "remove --auto-remove"
+    flags = ["remove", "--auto-remove"]
   }
   action "refresh" {
-    flags = "update"
+    flags = ["update"]
   }
   action "update" {
-    flags = "dist-upgrade"
+    flags = ["dist-upgrade"]
   }
 }
