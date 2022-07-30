@@ -25,23 +25,23 @@ func (m *ManagerOperation) Run(ctx context.Context) error {
 		return errors.New("customManager is nil")
 	}
 	if err := customManager.ActionMap["refresh"].Run(ctx); err != nil {
-		return errors.Wrap(err, "error on refresh packages")
+		return errors.Wrap(err, "refresh packages")
 	}
 	if m.Update {
 		if err := customManager.ActionMap["update"].Run(ctx); err != nil {
-			return errors.Wrap(err, "error on update packages")
+			return errors.Wrap(err, "update packages")
 		}
 	}
 	for _, set := range m.Sets {
 		action := customManager.ActionMap[set.Action]
 		ctx = context.WithValue(ctx, ActionContextKey, action)
 		if err := set.Run(ctx); err != nil {
-			return errors.Wrapf(err, "error on %s packages", action.Type)
+			return errors.Wrapf(err, "%s packages", action.Type)
 		}
 	}
 	if m.Cleanup {
 		if err := customManager.ActionMap["clean"].Run(ctx); err != nil {
-			return errors.Wrap(err, "error on clean packages")
+			return errors.Wrap(err, "clean packages")
 		}
 	}
 	return nil

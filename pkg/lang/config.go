@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Managers         []ManagerOperation `hcl:"manager,block"`
 	CustomManagers   []*CustomManager   `hcl:"custom_manager,block"`
+	Commands         []*Command         `hcl:"command,block"`
 	CustomManagerMap map[string]*CustomManager
 	Remain           hcl.Body `hcl:",remain"`
 }
@@ -19,6 +20,7 @@ func (c *Config) Validate(ctx *hcl.EvalContext) hcl.Diagnostics {
 	if c.CustomManagerMap == nil {
 		c.CustomManagerMap = make(map[string]*CustomManager)
 	}
+
 	for _, manager := range c.CustomManagers {
 		moreDiags := manager.Validate(ctx.NewChild())
 		diags = append(diags, moreDiags...)
@@ -56,7 +58,12 @@ func (c *Config) Run(ctx context.Context) error {
 		customManager := c.CustomManagerMap[manager.Name]
 		ctx = context.WithValue(ctx, CustomManagerContextKey, customManager)
 		if err := manager.Run(ctx); err != nil {
-			return errors.Wrapf(err, "error on run manager %s", manager.Name)
+			return errors.Wrapf(err, "run manager %s", manager.Name)
+		}
+	}
+	for _, command := range c.Commands {
+		if err := command.Run(ctx); err != nil {
+			return errors.Wrapf(err, "run command")
 		}
 	}
 	return nil

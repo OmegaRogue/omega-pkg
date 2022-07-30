@@ -3,6 +3,7 @@ package lang
 import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/ext/tryfunc"
+	"github.com/hashicorp/hcl/v2/ext/typeexpr"
 	"github.com/pkg/errors"
 	"github.com/zcalusic/sysinfo"
 	"github.com/zclconf/go-cty/cty"
@@ -77,26 +78,8 @@ func Functions() map[string]function.Function {
 		"upper":           stdlib.UpperFunc,
 		"values":          stdlib.ValuesFunc,
 		"zipmap":          stdlib.ZipmapFunc,
+		"convert":         typeexpr.ConvertFunc,
 	}
-	//functions["templatefile"] = funcs.MakeTemplateFileFunc(
-	//	cwd, func() map[string]function.Function {
-	//		// The templatefile function prevents recursive calls to itself
-	//		// by copying this map and overwriting the "templatefile" entry.
-	//		return functions
-	//	},
-	//)
-	//
-	//functions["file"] = funcs.MakeFileFunc(cwd, false)
-	//functions["fileexists"] = funcs.MakeFileExistsFunc(s.BaseDir)
-	//functions["fileset"] = funcs.MakeFileSetFunc(s.BaseDir)
-	//functions["filebase64"] = funcs.MakeFileFunc(s.BaseDir, true)
-	//functions["filebase64sha256"] = funcs.MakeFileBase64Sha256Func(s.BaseDir)
-	//functions["filebase64sha512"] = funcs.MakeFileBase64Sha512Func(s.BaseDir)
-	//functions["filemd5"] = funcs.MakeFileMd5Func(s.BaseDir)
-	//functions["filesha1"] = funcs.MakeFileSha1Func(s.BaseDir)
-	//functions["filesha256"] = funcs.MakeFileSha256Func(s.BaseDir)
-	//functions["filesha512"] = funcs.MakeFileSha512Func(s.BaseDir)
-
 	return functions
 }
 
@@ -105,20 +88,19 @@ func BuildGlobalContext() (*hcl.EvalContext, error) {
 	si.GetSysInfo()
 	typ, err := gocty.ImpliedType(si)
 	if err != nil {
-		return nil, errors.Wrap(err, "error on convert sysinfo to cty.Type")
+		return nil, errors.Wrap(err, "convert sysinfo to cty.Type")
 	}
 	val, err := gocty.ToCtyValue(si, typ)
 	if err != nil {
-		return nil, errors.Wrap(err, "error on convert sysinfo to cty.Value")
+		return nil, errors.Wrap(err, "convert sysinfo to cty.Value")
 	}
 	ctx := &hcl.EvalContext{
 		Variables: map[string]cty.Value{
 			"sysinfo": val,
 			"variant": cty.StringVal(""),
 		},
-		Functions: map[string]function.Function{
-			"concat": stdlib.ConcatFunc,
-		},
+		Functions: Functions(),
 	}
+
 	return ctx, nil
 }

@@ -56,11 +56,11 @@ func runCommand(ctx context.Context, command string, args ...string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "error on start command")
+		return errors.Wrap(err, "start command")
 	}
 
 	if err := cmd.Wait(); err != nil {
-		return errors.Wrap(err, "error on wait for command completion")
+		return errors.Wrap(err, "wait for command completion")
 	}
 	return nil
 

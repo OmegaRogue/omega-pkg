@@ -25,7 +25,7 @@ func (p2 *PipeReadWriteCloser) Read(p []byte) (int, error) {
 
 	n, err := p2.reader.Read(p)
 	if err != nil {
-		return n, errors.Wrap(err, "error on read")
+		return n, errors.Wrap(err, "read")
 	}
 	return n, nil
 }
@@ -33,17 +33,17 @@ func (p2 *PipeReadWriteCloser) Read(p []byte) (int, error) {
 func (p2 *PipeReadWriteCloser) Write(p []byte) (int, error) {
 	n, err := p2.writer.Write(p)
 	if err != nil {
-		return n, errors.Wrap(err, "error on write")
+		return n, errors.Wrap(err, "write")
 	}
 	return n, nil
 }
 
 func (p2 *PipeReadWriteCloser) Close() error {
 	if err := p2.writer.Close(); err != nil {
-		return errors.Wrap(err, "error on close writer")
+		return errors.Wrap(err, "close writer")
 	}
 	if err := p2.reader.Close(); err != nil {
-		return errors.Wrap(err, "error on close reader")
+		return errors.Wrap(err, "close reader")
 	}
 	return nil
 }

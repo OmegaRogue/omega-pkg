@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/zcalusic/sysinfo"
+	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 	"omega-pkg/internal/managers"
 	"omega-pkg/pkg/lang"
@@ -61,7 +62,7 @@ to quickly create a Cobra application.`,
 		ctx = context.WithValue(ctx, lang.DryrunContextKey, viper.GetBool("dryrun"))
 		c := viper.Get("config").(lang.Config)
 		if err := c.Run(ctx); err != nil {
-			log.Fatal().Err(err).Msg("error on run")
+			log.Fatal().Err(err).Msg("run")
 		}
 		//data, err = json.MarshalIndent(&c, "", "  ")
 		//if err != nil {
@@ -77,7 +78,7 @@ to quickly create a Cobra application.`,
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
-		log.Fatal().Err(err).Msg("error on run")
+		log.Fatal().Err(err).Msg("run")
 		os.Exit(1)
 	}
 }
@@ -96,7 +97,10 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("dryrun", "d", false, "print commands to run to output")
-	viper.BindPFlag("dryrun", rootCmd.Flags().Lookup("dryrun"))
+	err := viper.BindPFlag("dryrun", rootCmd.Flags().Lookup("dryrun"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("bind flag dryrun")
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -122,6 +126,10 @@ func initConfig() {
 	diags = append(diags, funcDiags...)
 
 	ctx.Functions = lo.Assign[string, function.Function](userfuncs, ctx.Functions)
+
+	locals, remain, localDiags := lang.DecodeLocals(remain, ctx)
+	diags = append(diags, localDiags...)
+	ctx.Variables["local"] = cty.ObjectVal(locals)
 
 	bodyDiags := gohcl.DecodeBody(remain, ctx, &c)
 	diags = append(diags, bodyDiags...)

@@ -16,11 +16,6 @@ type Action struct {
 	command []string
 	Remain  hcl.Body `hcl:",remain"`
 }
-type ActionRemain struct {
-	CmdExpr    hcl.Expression   `hcl:"cmd,optional"`
-	FlagExprs  hcl.Expression   `hcl:"flags,optional"`
-	InlineExpr []hcl.Expression `hcl:"inline,optional"`
-}
 
 var ActionRemainSpec = hcldec.ObjectSpec{
 	"cmd": &hcldec.AttrSpec{
@@ -63,7 +58,7 @@ func (a *Action) Prepare(
 			actionCmd = "/bin/sh"
 			flags = []string{"-c"}
 		}
-		flags = append(flags, append(actionFlags, strings.Join(actionInline, "\n"))...)
+		flags = append(actionFlags, append(flags, strings.Join(actionInline, "\n"))...)
 	} else if actionCmd == "" && globalCmd != "" {
 		actionCmd = globalCmd
 	} else {
@@ -80,7 +75,7 @@ func (a *Action) Prepare(
 
 func (a *Action) Run(ctx context.Context) error {
 	if err := runCommand(ctx, a.command[0], a.command[1:]...); err != nil {
-		return errors.Wrapf(err, "error on run command on action %s", a.Type)
+		return errors.Wrapf(err, "run command on action %s", a.Type)
 	}
 	return nil
 }
