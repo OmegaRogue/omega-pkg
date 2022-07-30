@@ -131,6 +131,10 @@ func initConfig() {
 	diags = append(diags, localDiags...)
 	ctx.Variables["local"] = cty.ObjectVal(locals)
 
+	vars, remain, varDiags := lang.DecodeVariable(remain, ctx)
+	diags = append(diags, varDiags...)
+	ctx.Variables["vars"] = cty.ObjectVal(vars)
+
 	bodyDiags := gohcl.DecodeBody(remain, ctx, &c)
 	diags = append(diags, bodyDiags...)
 

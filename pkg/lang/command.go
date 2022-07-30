@@ -18,7 +18,8 @@ func (c *Command) Run(ctx context.Context) error {
 	}
 	c.Flags = append(c.Flags, "-c")
 	flags := append(c.Flags, strings.Join(c.Inline, "\n"))
-	if err := runCommand(ctx, c.Cmd, flags...); err != nil {
+
+	if _, err := runCommand(ctx, c.Cmd, flags...); err != nil {
 		return errors.Wrap(err, "run command")
 	}
 	return nil

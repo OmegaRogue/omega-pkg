@@ -113,7 +113,7 @@ func (s *Set) Prepare(
 }
 
 func (s *Set) Run(ctx context.Context) error {
-	if err := runCommand(ctx, s.command[0], s.command[1:]...); err != nil {
+	if _, err := runCommand(ctx, s.command[0], s.command[1:]...); err != nil {
 		return errors.Wrapf(err, "run command on set of action %s", s.Action)
 	}
 	return nil

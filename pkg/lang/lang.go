@@ -1,6 +1,7 @@
 package lang
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/hashicorp/hcl/v2"
@@ -8,6 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/pkg/errors"
 	"github.com/zclconf/go-cty/cty"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,7 +35,7 @@ var (
 	CustomManagerContextKey = contextKey{"customManager"}
 )
 
-func runCommand(ctx context.Context, command string, args ...string) error {
+func runCommand(ctx context.Context, command string, args ...string) (string, error) {
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd := ctx.Value(CwdContextKey); cwd != nil {
@@ -48,21 +50,23 @@ func runCommand(ctx context.Context, command string, args ...string) error {
 			fmt.Println(s)
 		}
 		fmt.Println(command + " " + strings.Join(args, " "))
-		return nil
+		return "", nil
 	}
 
+	var stdBuffer bytes.Buffer
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdBuffer)
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return errors.Wrap(err, "start command")
+		return "", errors.Wrap(err, "start command")
 	}
 
 	if err := cmd.Wait(); err != nil {
-		return errors.Wrap(err, "wait for command completion")
+		return "", errors.Wrap(err, "wait for command completion")
 	}
-	return nil
+
+	return stdBuffer.String(), nil
 
 }
 

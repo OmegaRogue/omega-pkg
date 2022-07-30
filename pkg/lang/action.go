@@ -74,7 +74,7 @@ func (a *Action) Prepare(
 }
 
 func (a *Action) Run(ctx context.Context) error {
-	if err := runCommand(ctx, a.command[0], a.command[1:]...); err != nil {
+	if _, err := runCommand(ctx, a.command[0], a.command[1:]...); err != nil {
 		return errors.Wrapf(err, "run command on action %s", a.Type)
 	}
 	return nil
