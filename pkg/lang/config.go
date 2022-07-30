@@ -11,6 +11,7 @@ type Config struct {
 	Managers         []ManagerOperation `hcl:"manager,block"`
 	CustomManagers   []*CustomManager   `hcl:"custom_manager,block"`
 	CustomManagerMap map[string]*CustomManager
+	Remain           hcl.Body `hcl:",remain"`
 }
 
 func (c *Config) Validate(ctx *hcl.EvalContext) hcl.Diagnostics {

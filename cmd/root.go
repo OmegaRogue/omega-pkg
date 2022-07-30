@@ -19,13 +19,16 @@ package cmd
 import (
 	"context"
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/ext/userfunc"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/zcalusic/sysinfo"
+	"github.com/zclconf/go-cty/cty/function"
 	"omega-pkg/internal/managers"
 	"omega-pkg/pkg/lang"
 	"omega-pkg/pkg/zerolog_extension"
@@ -55,6 +58,7 @@ to quickly create a Cobra application.`,
 		//}
 		//fmt.Println(string(data))
 		ctx := log.Logger.WithContext(context.Background())
+		ctx = context.WithValue(ctx, lang.DryrunContextKey, viper.GetBool("dryrun"))
 		c := viper.Get("config").(lang.Config)
 		if err := c.Run(ctx); err != nil {
 			log.Fatal().Err(err).Msg("error on run")
@@ -91,7 +95,8 @@ func init() {
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.Flags().BoolP("dryrun", "d", false, "print commands to run to output")
+	viper.BindPFlag("dryrun", rootCmd.Flags().Lookup("dryrun"))
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -103,14 +108,23 @@ func initConfig() {
 	base, baseDiags := parser.ParseHCL(managers.Base, "base.hcl")
 
 	f, diags := parser.ParseHCLFile("server.hcl")
+
+	diags = append(diags, baseDiags...)
+
 	body := hcl.MergeBodies([]hcl.Body{base.Body, f.Body})
 	var c lang.Config
 	ctx, err := lang.BuildGlobalContext()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error build global hcl context")
 	}
-	bodyDiags := gohcl.DecodeBody(body, ctx, &c)
-	diags = append(append(diags, baseDiags...), bodyDiags...)
+
+	userfuncs, remain, funcDiags := userfunc.DecodeUserFunctions(body, "func", func() *hcl.EvalContext { return ctx })
+	diags = append(diags, funcDiags...)
+
+	ctx.Functions = lo.Assign[string, function.Function](userfuncs, ctx.Functions)
+
+	bodyDiags := gohcl.DecodeBody(remain, ctx, &c)
+	diags = append(diags, bodyDiags...)
 
 	wr := hcl.NewDiagnosticTextWriter(
 		zerolog_extension.LoggerWithLevel(log.Logger, zerolog.ErrorLevel), // writer to send messages to
